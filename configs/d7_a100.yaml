@@ -1,0 +1,33 @@
+# d=7, single A100
+run_dir: runs/d7_a100
+distance: 7
+rounds: 7
+p: 0.03
+# q defaults to p
+
+steps: 120000
+batch_size: 128
+lr: 3.0e-3
+min_lr: 1.0e-4
+warmup: 500
+weight_decay: 1.0e-4
+grad_clip: 1.0
+weight_by_t: false
+
+eval_every: 2000
+eval_shots: 50000
+infer_steps: 16        # masked-diffusion unmasking steps at inference
+log_every: 200
+ckpt_every: 2000
+max_minutes: 1320      # ~22h guard, checkpoint & exit before the 24h wall limit
+seed: 0
+
+model:
+  d_model: 256
+  n_heads: 8
+  n_layers: 6
+  d_ff: 1024
+  conv_channels: 32
+  conv_layers: 7
+  use_conv_stem: true
+  sigma_init: 3.0

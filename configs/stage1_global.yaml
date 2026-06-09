@@ -1,0 +1,28 @@
+# stage 1: d=3 in the global limit (large sigma_init), MIG-sized
+run_dir: runs/stage1_global
+distance: 3
+rounds: 3
+p: 0.03
+steps: 60000
+batch_size: 512
+lr: 3.0e-3
+min_lr: 1.0e-4
+warmup: 500
+weight_decay: 1.0e-4
+grad_clip: 1.0
+eval_every: 2000
+eval_shots: 50000
+infer_steps: 16
+log_every: 200
+ckpt_every: 2000
+max_minutes: 1320
+seed: 0
+model:
+  d_model: 128
+  n_heads: 8
+  n_layers: 4
+  d_ff: 512
+  conv_channels: 32
+  conv_layers: 2
+  use_conv_stem: true
+  sigma_init: 100.0      # effectively global attention

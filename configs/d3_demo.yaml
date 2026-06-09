@@ -1,0 +1,25 @@
+run_dir: runs/d3_demo
+distance: 3
+p: 0.03
+steps: 4000
+batch_size: 128
+lr: 4.0e-3
+min_lr: 2.0e-4
+warmup: 200
+weight_decay: 1.0e-4
+grad_clip: 1.0
+eval_every: 500
+eval_shots: 3000
+eval_batch: 512
+infer_steps: 8
+log_every: 250
+ckpt_every: 200
+max_minutes: 1000
+seed: 0
+model:
+  d_model: 64
+  n_heads: 4
+  n_layers: 3
+  d_ff: 192
+  use_conv_stem: false
+  sigma_init: 100.0

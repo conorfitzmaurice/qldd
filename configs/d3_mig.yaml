@@ -1,0 +1,33 @@
+# d=3, sized for the 10 GB MIG slice
+run_dir: runs/d3_mig
+distance: 3
+rounds: 3
+p: 0.03
+# q defaults to p
+
+steps: 60000
+batch_size: 512
+lr: 3.0e-3
+min_lr: 1.0e-4
+warmup: 500
+weight_decay: 1.0e-4
+grad_clip: 1.0
+weight_by_t: false
+
+eval_every: 2000
+eval_shots: 50000
+infer_steps: 16        # masked-diffusion unmasking steps at inference
+log_every: 200
+ckpt_every: 2000
+max_minutes: 1320      # ~22h guard, checkpoint & exit before the 24h wall limit
+seed: 0
+
+model:
+  d_model: 128
+  n_heads: 8
+  n_layers: 4
+  d_ff: 512
+  conv_channels: 32
+  conv_layers: 3
+  use_conv_stem: true
+  sigma_init: 2.0

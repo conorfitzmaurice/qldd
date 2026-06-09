@@ -1,0 +1,28 @@
+# clean locality test: d=7, conv stem off so sigma carries all the range
+run_dir: runs/d7_local
+distance: 7
+rounds: 7
+p: 0.03
+steps: 120000
+batch_size: 96
+lr: 2.0e-3
+min_lr: 8.0e-5
+warmup: 800
+weight_decay: 1.0e-4
+grad_clip: 1.0
+eval_batch: 96
+eval_every: 3000
+eval_shots: 80000
+infer_steps: 24
+log_every: 200
+ckpt_every: 3000
+max_minutes: 1320
+seed: 0
+model:
+  d_model: 256
+  n_heads: 8
+  n_layers: 6
+  d_ff: 1024
+  use_conv_stem: false   # sigma carries all range -> clean locality measurement
+  sigma_init: 1.0        # start ~global; let it shrink if locality holds
+  window_radius: 3.0     # hard sparse window (lattice units) -> O(T*K), fits one A100
