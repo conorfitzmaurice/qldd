@@ -61,7 +61,7 @@ python -m qldd.train --config configs/d3_mig.yaml
 python scripts/threshold_gate.py --runs runs/d3_mig runs/d5_a100 runs/d7_a100
 ```
 
-## Running on Della
+## Running on GPU
 
 MIG partition (10 GB, fast queue) for d=3 and debugging; one A100 for d=5/7.
 Write active output to `/scratch/gpfs/$USER`. Jobs stay under 24h since the
