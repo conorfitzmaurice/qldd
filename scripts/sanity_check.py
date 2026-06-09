@@ -27,7 +27,7 @@ def main():
     hi = {d: sw["ler"][d][-1] for d in sw["distances"]}
     cross = (lo[7] < lo[3]) and (hi[7] > hi[3])
     print(f"\n  threshold crossing present: {cross}")
-    assert cross, "NO THRESHOLD CROSSING -- pipeline suspect"
+    assert cross, "no threshold crossing, pipeline suspect"
     print("\nALL SANITY CHECKS PASSED")
 
 

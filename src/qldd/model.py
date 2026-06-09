@@ -243,6 +243,6 @@ class LocalDiffusionDecoder(nn.Module):
         return self.head(err_out).squeeze(-1)     # (B, n_err)
 
     def locality_radii(self):
-        """Current per-head sigma for every layer -- the learned locality scale."""
+        """Current per-head sigma for every layer (the learned locality scale)."""
         return {f"layer{i}": blk.attn.sigma().detach().cpu().numpy()
                 for i, blk in enumerate(self.blocks)}

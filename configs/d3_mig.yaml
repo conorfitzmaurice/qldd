@@ -16,10 +16,10 @@ weight_by_t: false
 
 eval_every: 2000
 eval_shots: 50000
-infer_steps: 16        # masked-diffusion unmasking steps at inference
+infer_steps: 16  # masked-diffusion unmasking steps at inference
 log_every: 200
 ckpt_every: 2000
-max_minutes: 1320      # ~22h guard, checkpoint & exit before the 24h wall limit
+max_minutes: 1320  # ~22h guard, checkpoint & exit before the 24h wall limit
 seed: 0
 
 model:

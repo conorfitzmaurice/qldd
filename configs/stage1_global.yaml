@@ -25,4 +25,4 @@ model:
   conv_channels: 32
   conv_layers: 2
   use_conv_stem: true
-  sigma_init: 100.0      # effectively global attention
+  sigma_init: 100.0  # effectively global attention
