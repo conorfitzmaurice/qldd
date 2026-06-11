@@ -20,6 +20,7 @@ from typing import Optional
 
 import numpy as np
 import torch
+import torch.utils.checkpoint
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -38,6 +39,11 @@ class ModelConfig:
     use_conv_stem: bool = True
     xi_init: float = 2.0         # initial attention decay length (LATTICE units)
     window_radius: Optional[float] = None  # optional hard cutoff (lattice units)
+    grad_checkpoint: bool = True # recompute blocks in backward: one block's attn
+                                 # matrices live at a time instead of n_layers.
+                                 # Needed because a grad-requiring attn_mask
+                                 # (trainable xi) forces SDPA onto the math
+                                 # backend, which materializes (B,h,T,T).
     sigma_init: float = 2.0      # legacy field (pre-SDPA checkpoints); unused
 
 
@@ -188,7 +194,11 @@ class LocalDiffusionDecoder(nn.Module):
 
         x = torch.cat([det, err], dim=1)          # (B, T, d_model)
         for blk in self.blocks:
-            x = blk(x, self.dist)
+            if self.cfg.grad_checkpoint and self.training:
+                x = torch.utils.checkpoint.checkpoint(
+                    blk, x, self.dist, use_reentrant=False)
+            else:
+                x = blk(x, self.dist)
         x = self.ln_f(x)
         return self.head(x[:, self.n_det:, :]).squeeze(-1)
 

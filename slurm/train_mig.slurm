@@ -24,6 +24,7 @@ mkdir -p logs runs
 export QLDD_SCRATCH="/scratch/gpfs/$USER/qldd"
 mkdir -p "$QLDD_SCRATCH" 2>/dev/null || echo "(scratch unavailable, continuing)"
 
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export PYTHONPATH="$SLURM_SUBMIT_DIR/src:$PYTHONPATH"
 srun ~/.conda/envs/qldd/bin/python -m qldd.train --config "$CONFIG"
 

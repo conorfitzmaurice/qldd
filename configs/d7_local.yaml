@@ -4,13 +4,13 @@ distance: 7
 rounds: 7
 p: 0.03
 steps: 120000
-batch_size: 128
+batch_size: 32
 lr: 2.0e-3
 min_lr: 8.0e-5
 warmup: 800
 weight_decay: 1.0e-4
 grad_clip: 1.0
-eval_batch: 256
+eval_batch: 64
 eval_every: 3000
 eval_shots: 80000
 infer_steps: 24
