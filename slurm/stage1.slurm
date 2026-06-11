@@ -19,14 +19,17 @@ conda activate qldd
 
 cd "$SLURM_SUBMIT_DIR"
 mkdir -p logs runs
-export QLDD_SCRATCH="/scratch/gpfs/$USER/qldd"; mkdir -p "$QLDD_SCRATCH"
+export QLDD_SCRATCH="/scratch/gpfs/$USER/qldd"; mkdir -p "$QLDD_SCRATCH" 2>/dev/null || echo "(scratch unavailable, continuing)"
 
+export PYTHONPATH="$SLURM_SUBMIT_DIR/src:$PYTHONPATH"
 srun python -m qldd.train --config configs/stage1_global.yaml
 
 if [ -f runs/stage1_global/DONE ]; then
     echo "stage-1 verdict:"
     python scripts/stage1_verdict.py --run runs/stage1_global
-else
-    echo "Not finished; requeuing to continue from checkpoint..."
+elif grep -q '\[walltime\]' "logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.out"; then
+    echo "Walltime guard hit; requeuing to continue from checkpoint..."
     sbatch "$0"
+else
+    echo "Exited abnormally -- NOT requeuing. Check errors above."
 fi

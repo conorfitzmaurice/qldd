@@ -27,7 +27,8 @@ def conv_receptive_field_voxels(model: LocalDiffusionDecoder) -> dict:
     stem = model.stem
     X, Y, T = stem.grid_shape
     dm = model.cfg.d_model
-    grid = torch.zeros(1, dm, X, Y, T, requires_grad=True)
+    dev = next(stem.conv.parameters()).device
+    grid = torch.zeros(1, dm, X, Y, T, requires_grad=True, device=dev)
     out = stem.conv(grid)                           # (1, dm, X, Y, T)
     cx, cy, ct = X // 2, Y // 2, T // 2
     out[:, :, cx, cy, ct].sum().backward()
