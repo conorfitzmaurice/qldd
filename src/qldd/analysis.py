@@ -1,8 +1,9 @@
 """Effective-range analysis.
 
 The locality measurement is confounded if the conv stem's receptive field
-already spans the code, so report total_range = max(conv_RF, sigma in lattice
-units) against the grid width. Clean locality runs need the conv stem off.
+already spans the code, so report total_range = max(conv_RF, xi) against the
+grid width. xi (the soft-attention decay length) is already in lattice units.
+Clean locality runs need the conv stem off.
 """
 
 from __future__ import annotations
@@ -11,12 +12,6 @@ import numpy as np
 import torch
 
 from .model import LocalDiffusionDecoder
-
-
-@torch.no_grad()
-def _coord_span_lattice(model: LocalDiffusionDecoder) -> float:
-    # sigma_norm * span = sigma in lattice units
-    return float(max(model.det_grid_shape[0] - 1, 1))
 
 
 def conv_receptive_field_voxels(model: LocalDiffusionDecoder) -> dict:
@@ -53,15 +48,18 @@ def grid_spatial_width(model: LocalDiffusionDecoder) -> int:
 
 @torch.no_grad()
 def attention_range_lattice(model: LocalDiffusionDecoder) -> dict:
-    """sigma per layer (mean over heads); lattice range = sigma_norm * (width-1)."""
-    span = max(grid_spatial_width(model) - 1, 1)
+    """xi per layer (lattice units): the exp(-d/xi) decay length, per head.
+    If a hard window_radius is set, the effective range is capped by it."""
+    cap = model.cfg.window_radius
     out = {}
     for i, blk in enumerate(model.blocks):
-        sig = blk.attn.sigma().detach().cpu().numpy()  # (n_heads,) normalized
+        xi = blk.attn.xi().detach().cpu().numpy()      # (n_heads,) lattice units
+        eff = np.minimum(xi, cap) if cap is not None else xi
         out[f"layer{i}"] = {
-            "sigma_norm_mean": float(sig.mean()),
-            "sigma_norm_min": float(sig.min()),
-            "sigma_lattice_mean": float(sig.mean() * span),
+            "xi_mean": float(xi.mean()),
+            "xi_min": float(xi.min()),
+            "xi_max": float(xi.max()),
+            "sigma_lattice_mean": float(eff.mean()),   # key kept for train.py/aggregators
         }
     return out
 
@@ -70,7 +68,7 @@ def locality_report(model: LocalDiffusionDecoder, code) -> dict:
     rf = conv_receptive_field_voxels(model)
     width = grid_spatial_width(model)
     att = attention_range_lattice(model)
-    # binding attention range = smallest layer sigma
+    # binding attention range = smallest layer effective xi
     sig_latt = [v["sigma_lattice_mean"] for v in att.values()
                 if v["sigma_lattice_mean"] is not None]
     att_range = float(np.min(sig_latt)) if sig_latt else None
