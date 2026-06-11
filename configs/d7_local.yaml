@@ -4,13 +4,13 @@ distance: 7
 rounds: 7
 p: 0.03
 steps: 120000
-batch_size: 96
+batch_size: 16
 lr: 2.0e-3
 min_lr: 8.0e-5
 warmup: 800
 weight_decay: 1.0e-4
 grad_clip: 1.0
-eval_batch: 96
+eval_batch: 32
 eval_every: 3000
 eval_shots: 80000
 infer_steps: 24
@@ -25,4 +25,4 @@ model:
   d_ff: 1024
   use_conv_stem: false  # sigma carries all range -> clean locality measurement
   sigma_init: 1.0  # start ~global; let it shrink if locality holds
-  window_radius: 3.0  # hard sparse window (lattice units) -> O(T*K), fits one A100
+  window_radius: 1.5  # K=84 nbrs; gather mem ~B*K*dk per layer -- R=3.0 (K=645) OOMs
