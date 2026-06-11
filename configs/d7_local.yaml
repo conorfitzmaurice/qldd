@@ -4,13 +4,13 @@ distance: 7
 rounds: 7
 p: 0.03
 steps: 120000
-batch_size: 16
+batch_size: 64
 lr: 2.0e-3
 min_lr: 8.0e-5
 warmup: 800
 weight_decay: 1.0e-4
 grad_clip: 1.0
-eval_batch: 32
+eval_batch: 128
 eval_every: 3000
 eval_shots: 80000
 infer_steps: 24
@@ -19,10 +19,10 @@ ckpt_every: 3000
 max_minutes: 1320
 seed: 0
 model:
-  d_model: 256
-  n_heads: 8
+  d_model: 64
+  n_heads: 4
   n_layers: 6
-  d_ff: 1024
+  d_ff: 256
   use_conv_stem: false  # sigma carries all range -> clean locality measurement
   sigma_init: 1.0  # start ~global; let it shrink if locality holds
   window_radius: 1.5  # K=84 nbrs; gather mem ~B*K*dk per layer -- R=3.0 (K=645) OOMs
