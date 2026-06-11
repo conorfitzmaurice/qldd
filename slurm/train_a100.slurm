@@ -1,6 +1,5 @@
 #!/bin/bash
 #SBATCH --job-name=qldd-a100
-#SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8               # for Stim sampling / host work
@@ -22,12 +21,12 @@ conda activate qldd
 
 cd "$SLURM_SUBMIT_DIR"
 mkdir -p logs runs
-export QLDD_SCRATCH="/scratch/gpfs/$USER/qldd"; mkdir -p "$QLDD_SCRATCH"
+export QLDD_SCRATCH="/scratch/gpfs/$USER/qldd"; mkdir -p "$QLDD_SCRATCH" 2>/dev/null || echo "(scratch unavailable, continuing)"
 
 export PYTHONPATH="$SLURM_SUBMIT_DIR/src:$PYTHONPATH"
-srun python -m qldd.train --config "$CONFIG"
+srun ~/.conda/envs/qldd/bin/python -m qldd.train --config "$CONFIG"
 
 if [ ! -f "runs/${NAME}/DONE" ] && grep -q '\[walltime\]' "logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.out" 2>/dev/null; then
     echo "Requeuing to continue..."
-    sbatch --export=CONFIG="$CONFIG",NAME="$NAME" "$0"
+    sbatch --export=ALL,CONFIG="$CONFIG",NAME="$NAME" "$0"
 fi
