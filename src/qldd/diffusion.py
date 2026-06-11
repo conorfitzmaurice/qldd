@@ -101,6 +101,10 @@ def evaluate_ler(model, code, s_np, e_np, l_np, n_steps=None, device="cpu",
         eg = decode(model, s, n_steps=n_steps)     # (b, n_err) uint8
         eg_all[i:i+batch] = eg.cpu().numpy()
     clears, logical = residual_is_logical(code, e_np, eg_all)
+    # residual spacetime defects: detectors still lit after the correction,
+    # i.e. weight of s XOR H e_guess. clears == (defects == 0).
+    res_syn = (s_np.astype(np.uint8) ^ ((code.H @ eg_all.T) % 2).T.astype(np.uint8))
+    defects = res_syn.sum(axis=1).astype(int)
     n_fail = int(logical.sum())
     n_clear = int(clears.sum())
     n_stab = int((clears & ~logical).sum())
@@ -115,4 +119,9 @@ def evaluate_ler(model, code, s_np, e_np, l_np, n_steps=None, device="cpu",
         "n_fail": n_fail, "shots": N,
         "syndrome_cleared_frac": n_clear / N,
         "pure_stabilizer_residual_frac": n_stab / N,
+        "residual_defects_mean": float(defects.mean()),
+        "residual_defects_p90": float(np.percentile(defects, 90)),
+        "residual_defects_max": int(defects.max()),
+        "residual_defects_mean_given_unclean": (
+            float(defects[defects > 0].mean()) if (defects > 0).any() else 0.0),
     }

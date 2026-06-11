@@ -53,13 +53,13 @@ def attention_range_lattice(model: LocalDiffusionDecoder) -> dict:
     cap = model.cfg.window_radius
     out = {}
     for i, blk in enumerate(model.blocks):
-        xi = blk.attn.xi().detach().cpu().numpy()      # (n_heads,) lattice units
-        eff = np.minimum(xi, cap) if cap is not None else xi
+        xs = blk.attn.xi_space().detach().cpu().numpy()
+        xt = blk.attn.xi_time().detach().cpu().numpy()
+        eff = np.minimum(xs, cap) if cap is not None else xs
         out[f"layer{i}"] = {
-            "xi_mean": float(xi.mean()),
-            "xi_min": float(xi.min()),
-            "xi_max": float(xi.max()),
-            "sigma_lattice_mean": float(eff.mean()),   # key kept for train.py/aggregators
+            "xi_space_mean": float(xs.mean()), "xi_space_min": float(xs.min()),
+            "xi_time_mean": float(xt.mean()), "xi_time_min": float(xt.min()),
+            "sigma_lattice_mean": float(eff.mean()),   # spatial range; key kept for aggregators
         }
     return out
 

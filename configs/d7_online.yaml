@@ -1,5 +1,7 @@
-# clean locality test: d=7, conv stem off so sigma carries all the range
-run_dir: runs/d7_local
+# ONLINE-constrained d=7: causal time mask -- each token attends only to
+# syndrome at its own round or earlier. Same arch/budget as d7_local so the
+# offline-vs-online LER gap and cleared/defect stats are directly comparable.
+run_dir: runs/d7_online
 distance: 7
 rounds: 7
 p: 0.03
@@ -26,4 +28,5 @@ model:
   use_conv_stem: false  # xi carries all range -> clean locality measurement
   xi_space_init: 2.0    # spatial decay length (lattice units), trainable
   xi_time_init: 2.0     # temporal decay length (rounds), trainable
+  causal_time: true     # online information constraint
   # window_radius: null -> pure soft local attention (SDPA additive bias)

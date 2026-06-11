@@ -111,15 +111,19 @@ def main():
             rep = evaluate_ler(model, code, s, e, l,
                                n_steps=cfg.get("infer_steps"), device=device,
                                batch=cfg.get("eval_batch", 128))
-            sig = {k: np.asarray(v).mean().item()
-                   for k, v in model.locality_radii().items()}
+            rads = model.locality_radii()
+            xi_s = float(np.mean([np.mean(v["xi_space"]) for v in rads.values()]))
+            xi_t = float(np.mean([np.mean(v["xi_time"]) for v in rads.values()]))
             loc = locality_report(model, code)
             rec = {"step": step, "loss": loss.item(),
                    "diff_ler": rep["ler"], "diff_ler_strict": rep["ler_strict"],
                    "mwpm_ler": mwpm["ler"],
                    "cleared": rep["syndrome_cleared_frac"],
                    "stab_residual": rep["pure_stabilizer_residual_frac"],
-                   "sigma_mean": float(np.mean(list(sig.values()))),
+                   "defects_mean": rep["residual_defects_mean"],
+                   "defects_p90": rep["residual_defects_p90"],
+                   "defects_mean_unclean": rep["residual_defects_mean_given_unclean"],
+                   "xi_space_mean": xi_s, "xi_time_mean": xi_t,
                    "total_range_lattice": loc["total_effective_range_lattice"],
                    "grid_width": loc["grid_width_voxels"],
                    "conv_is_global": loc["conv_is_global"],
@@ -127,7 +131,9 @@ def main():
             history.append(rec)
             print(f"[eval] step {step}  diff_LER {rep['ler']:.4f}  "
                   f"MWPM {mwpm['ler']:.4f}  cleared {rep['syndrome_cleared_frac']:.3f}  "
-                  f"range~{loc['total_effective_range_lattice']}/{loc['grid_width_voxels']}"
+                  f"xi_s~{xi_s:.2f} xi_t~{xi_t:.2f} "
+                  f"defects~{rep['residual_defects_mean']:.2f} "
+                  f"range~{loc['total_effective_range_lattice']:.2f}/{loc['grid_width_voxels']}"
                   f"{'  [CONFOUNDED]' if loc['conv_is_global'] else ''}", flush=True)
             with open(os.path.join(run_dir, "history.json"), "w") as f:
                 json.dump(history, f, indent=2)

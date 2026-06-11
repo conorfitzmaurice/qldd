@@ -37,8 +37,11 @@ class ModelConfig:
     conv_layers: int = 2
     dropout: float = 0.0
     use_conv_stem: bool = True
-    xi_init: float = 2.0         # initial attention decay length (LATTICE units)
+    xi_space_init: float = 2.0   # initial SPATIAL decay length (lattice units)
+    xi_time_init: float = 2.0    # initial TEMPORAL decay length (rounds)
+    causal_time: bool = False    # online constraint: attend only to t_key <= t_query
     window_radius: Optional[float] = None  # optional hard cutoff (lattice units)
+    xi_init: float = 2.0         # legacy isotropic init; unused
     grad_checkpoint: bool = True # recompute blocks in backward: one block's attn
                                  # matrices live at a time instead of n_layers.
                                  # Needed because a grad-requiring attn_mask
@@ -88,11 +91,19 @@ class SpacetimeConvStem(nn.Module):
 class SoftLocalAttention(nn.Module):
     """MHA via F.scaled_dot_product_attention with an additive distance bias.
 
-    Bias per head: -dist/xi  (== scaling attention weights by exp(-dist/xi)
-    before normalization), xi = softplus(raw_xi) trainable, in lattice units.
-    Optional hard window: -inf beyond window_radius (same bias tensor, so the
-    kernel never materializes anything batch-dependent beyond q,k,v).
+    Anisotropic soft locality: bias per head is -(d_xy/xi_s + |dt|/xi_t), i.e.
+    attention weights scale as exp(-d_xy/xi_s) * exp(-|dt|/xi_t) with SEPARATE
+    trainable spatial and temporal decay lengths (no reason they are equal --
+    xi_s is the spatial Markov length in lattice units, xi_t the temporal one
+    in rounds). Optional hard window (spatial) and causal-time mask (online
+    constraint: keys strictly in the future get -inf) live in the same bias
+    tensor, so nothing batch-dependent is materialized beyond q,k,v.
     """
+
+    @staticmethod
+    def _inv_softplus(x0: float) -> float:
+        x0 = max(x0, 1e-3)
+        return x0 if x0 > 20 else float(np.log(np.expm1(x0)))
 
     def __init__(self, cfg: ModelConfig):
         super().__init__()
@@ -100,26 +111,36 @@ class SoftLocalAttention(nn.Module):
         self.dk = cfg.d_model // cfg.n_heads
         self.qkv = nn.Linear(cfg.d_model, 3 * cfg.d_model)
         self.out = nn.Linear(cfg.d_model, cfg.d_model)
-        xi0 = max(cfg.xi_init, 1e-3)
-        # softplus^-1; for large x it's ~x (avoids expm1 overflow -> inf param)
-        inv = xi0 if xi0 > 20 else float(np.log(np.expm1(xi0)))
-        self.raw_xi = nn.Parameter(torch.full((cfg.n_heads,), inv))
+        self.raw_xi_s = nn.Parameter(
+            torch.full((cfg.n_heads,), self._inv_softplus(cfg.xi_space_init)))
+        self.raw_xi_t = nn.Parameter(
+            torch.full((cfg.n_heads,), self._inv_softplus(cfg.xi_time_init)))
         self.dropout_p = cfg.dropout
         self.window_radius = cfg.window_radius
+        self.causal_time = cfg.causal_time
 
-    def xi(self) -> torch.Tensor:
-        return F.softplus(self.raw_xi)  # (h,), lattice units
+    def xi_space(self) -> torch.Tensor:
+        return F.softplus(self.raw_xi_s)  # (h,), lattice units
 
-    def forward(self, x: torch.Tensor, dist: torch.Tensor) -> torch.Tensor:
-        # x: (B, T, d_model); dist: (T, T) pairwise distances, lattice units
+    def xi_time(self) -> torch.Tensor:
+        return F.softplus(self.raw_xi_t)  # (h,), rounds
+
+    def forward(self, x: torch.Tensor, geom: dict) -> torch.Tensor:
+        # x: (B, T, d_model); geom: dist_s/dist_t (T,T), dt_signed (T,T)
         B, T, _ = x.shape
         qkv = self.qkv(x).view(B, T, 3, self.h, self.dk).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]                  # (B, h, T, dk)
-        xi = self.xi().view(self.h, 1, 1)                 # (h, 1, 1)
-        bias = -(dist.unsqueeze(0) / xi)                  # (h, T, T)
+        xs = self.xi_space().view(self.h, 1, 1)
+        xt = self.xi_time().view(self.h, 1, 1)
+        bias = -(geom["dist_s"].unsqueeze(0) / xs) \
+               - (geom["dist_t"].unsqueeze(0) / xt)       # (h, T, T)
         if self.window_radius is not None:
-            bias = bias.masked_fill(dist.unsqueeze(0) > self.window_radius,
-                                    float("-inf"))
+            bias = bias.masked_fill(
+                geom["dist_s"].unsqueeze(0) > self.window_radius, float("-inf"))
+        if self.causal_time:
+            # key strictly in the future of the query -> blocked
+            bias = bias.masked_fill(
+                geom["dt_signed"].unsqueeze(0) > 0, float("-inf"))
         ctx = F.scaled_dot_product_attention(
             q, k, v, attn_mask=bias.unsqueeze(0),         # broadcast over B
             dropout_p=self.dropout_p if self.training else 0.0)
@@ -138,8 +159,8 @@ class Block(nn.Module):
             nn.Linear(cfg.d_ff, cfg.d_model),
         )
 
-    def forward(self, x, dist):
-        x = x + self.attn(self.ln1(x), dist)
+    def forward(self, x, geom):
+        x = x + self.attn(self.ln1(x), geom)
         x = x + self.ff(self.ln2(x))
         return x
 
@@ -153,12 +174,17 @@ class LocalDiffusionDecoder(nn.Module):
         self.n_det = code.n_det
         self.n_err = code.n_err
 
-        # pairwise distances in LATTICE units (xi reads off directly)
+        # pairwise distances in LATTICE units (xi_s/xi_t read off directly)
         det_c = _lattice_coords(code.det_coords)
         err_c = _lattice_coords(code.err_coords)
         all_c = np.concatenate([det_c, err_c], axis=0)          # (T, 3)
-        dist = np.sqrt(((all_c[:, None, :] - all_c[None, :, :]) ** 2).sum(-1))
-        self.register_buffer("dist", torch.as_tensor(dist, dtype=torch.float32))
+        dist_s = np.sqrt(((all_c[:, None, :2] - all_c[None, :, :2]) ** 2).sum(-1))
+        dt_signed = all_c[None, :, 2] - all_c[:, None, 2]       # t_key - t_query
+        self.register_buffer("dist_s", torch.as_tensor(dist_s, dtype=torch.float32))
+        self.register_buffer("dist_t", torch.as_tensor(np.abs(dt_signed),
+                                                       dtype=torch.float32))
+        self.register_buffer("dt_signed", torch.as_tensor(dt_signed,
+                                                          dtype=torch.float32))
 
         # detector voxel grid index for the conv stem + geometry
         gidx = np.round(det_c).astype(int)
@@ -193,16 +219,20 @@ class LocalDiffusionDecoder(nn.Module):
         err = err + self.coord_proj(self.coords[self.n_det:]).unsqueeze(0)
 
         x = torch.cat([det, err], dim=1)          # (B, T, d_model)
+        geom = {"dist_s": self.dist_s, "dist_t": self.dist_t,
+                "dt_signed": self.dt_signed}
         for blk in self.blocks:
             if self.cfg.grad_checkpoint and self.training:
                 x = torch.utils.checkpoint.checkpoint(
-                    blk, x, self.dist, use_reentrant=False)
+                    blk, x, geom, use_reentrant=False)
             else:
-                x = blk(x, self.dist)
+                x = blk(x, geom)
         x = self.ln_f(x)
         return self.head(x[:, self.n_det:, :]).squeeze(-1)
 
     def locality_radii(self):
-        """Learned per-head xi (lattice units) for every layer."""
-        return {f"layer{i}": blk.attn.xi().detach().cpu().numpy()
+        """Learned per-head (xi_space, xi_time) for every layer."""
+        return {f"layer{i}": {
+                    "xi_space": blk.attn.xi_space().detach().cpu().numpy(),
+                    "xi_time": blk.attn.xi_time().detach().cpu().numpy()}
                 for i, blk in enumerate(self.blocks)}
