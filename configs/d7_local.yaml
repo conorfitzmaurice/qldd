@@ -4,7 +4,7 @@ distance: 7
 rounds: 7
 p: 0.03
 steps: 120000
-batch_size: 32
+batch_size: 64
 lr: 2.0e-3
 min_lr: 8.0e-5
 warmup: 800
