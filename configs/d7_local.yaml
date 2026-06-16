@@ -23,7 +23,12 @@ model:
   n_heads: 4
   n_layers: 6
   d_ff: 256
-  use_conv_stem: false  # xi carries all range -> clean locality measurement
+  use_conv_stem: true   # 1 conv layer (RF~3): guaranteed local context so xi
+                        # can't collapse to "attend to nothing". xi then measures
+                        # the RESIDUAL attention range on top of local mixing.
+  conv_layers: 1
+  conv_channels: 32
   xi_space_init: 2.0    # spatial decay length (lattice units), trainable
   xi_time_init: 2.0     # temporal decay length (rounds), trainable
+  xi_min: 1.0           # floor: token always reaches its lattice neighbors
   # window_radius: null -> pure soft local attention (SDPA additive bias)

@@ -39,6 +39,10 @@ class ModelConfig:
     use_conv_stem: bool = True
     xi_space_init: float = 2.0   # initial SPATIAL decay length (lattice units)
     xi_time_init: float = 2.0    # initial TEMPORAL decay length (rounds)
+    xi_min: float = 1.0          # FLOOR: xi = xi_min + softplus(raw). Stops the
+                                 # degenerate "attend to nothing" collapse (xi->0)
+                                 # when no conv stem regularizes context. A token
+                                 # always reaches its lattice neighbors.
     causal_time: bool = False    # online constraint: attend only to t_key <= t_query
     window_radius: Optional[float] = None  # optional hard cutoff (lattice units)
     xi_init: float = 2.0         # legacy isotropic init; unused
@@ -111,19 +115,20 @@ class SoftLocalAttention(nn.Module):
         self.dk = cfg.d_model // cfg.n_heads
         self.qkv = nn.Linear(cfg.d_model, 3 * cfg.d_model)
         self.out = nn.Linear(cfg.d_model, cfg.d_model)
-        self.raw_xi_s = nn.Parameter(
-            torch.full((cfg.n_heads,), self._inv_softplus(cfg.xi_space_init)))
-        self.raw_xi_t = nn.Parameter(
-            torch.full((cfg.n_heads,), self._inv_softplus(cfg.xi_time_init)))
+        self.xi_min = cfg.xi_min
+        self.raw_xi_s = nn.Parameter(torch.full(
+            (cfg.n_heads,), self._inv_softplus(max(cfg.xi_space_init - cfg.xi_min, 1e-3))))
+        self.raw_xi_t = nn.Parameter(torch.full(
+            (cfg.n_heads,), self._inv_softplus(max(cfg.xi_time_init - cfg.xi_min, 1e-3))))
         self.dropout_p = cfg.dropout
         self.window_radius = cfg.window_radius
         self.causal_time = cfg.causal_time
 
     def xi_space(self) -> torch.Tensor:
-        return F.softplus(self.raw_xi_s)  # (h,), lattice units
+        return self.xi_min + F.softplus(self.raw_xi_s)  # (h,), lattice units, >= xi_min
 
     def xi_time(self) -> torch.Tensor:
-        return F.softplus(self.raw_xi_t)  # (h,), rounds
+        return self.xi_min + F.softplus(self.raw_xi_t)  # (h,), rounds, >= xi_min
 
     def forward(self, x: torch.Tensor, geom: dict) -> torch.Tensor:
         # x: (B, T, d_model); geom: dist_s/dist_t (T,T), dt_signed (T,T)
