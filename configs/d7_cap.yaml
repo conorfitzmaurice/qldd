@@ -1,0 +1,38 @@
+# d=7 CAPACITY test: does the approach decode d=7 at all with enough width?
+# Diagnosis of the d_model=64 runs: cleared pinned ~0.005 and xi sitting exactly
+# on its floor => the model defaulted to "maximally local / attend to nothing"
+# rather than learning a decoding rule. d_model 64 carried d=3 (76 mechanisms)
+# but d=7 has 1216 mechanisms + 336 detectors (~16x). This run isolates capacity:
+#   - d_model 128, 8 heads, 8 layers, d_ff 512  (~3.4x params)
+#   - conv stem OFF: let attention alone decode, so cleared/xi are honest
+#   - softer xi floor (0.5): permit genuine locality without hard-pinning at 1.0
+#   - longer schedule (200k) + larger batch (128): d=3 GO needed 60k on an easier task
+run_dir: runs/d7_cap
+distance: 7
+rounds: 7
+p: 0.03
+steps: 200000
+batch_size: 96
+lr: 2.0e-3
+min_lr: 5.0e-5
+warmup: 1500
+weight_decay: 1.0e-4
+grad_clip: 1.0
+eval_batch: 256
+eval_every: 4000
+eval_shots: 80000
+infer_steps: 48          # 2x d7_local: more unmask steps for the larger bit set
+log_every: 200
+ckpt_every: 4000
+max_minutes: 1320
+seed: 0
+model:
+  d_model: 128
+  n_heads: 8
+  n_layers: 8
+  d_ff: 512
+  use_conv_stem: false   # attention-only: honest cleared/xi signal
+  xi_space_init: 3.0     # start wider; let it contract if locality is real
+  xi_time_init: 3.0
+  xi_min: 0.5            # soft floor: allows true locality, still blocks 0-collapse
+  # window_radius: null
