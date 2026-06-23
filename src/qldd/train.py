@@ -95,6 +95,15 @@ def main():
                        cfg.get("warmup", 200))
         for g in opt.param_groups:
             g["lr"] = lr
+
+        # walltime guard at TOP of loop: checkpoint + exit before any costly
+        # eval can run past the wall clock (the d=7 eval is many minutes).
+        if (time.time() - t_start) / 60.0 > max_minutes:
+            print(f"[walltime] guard hit at step {step}; checkpointing & exiting "
+                  f"for requeue.", flush=True)
+            save_ckpt(ckpt_path, model, opt, step - 1, history, mcfg, cfg)
+            return
+
         e, s, _ = sample(code, bs)
         st = torch.as_tensor(s, dtype=torch.long, device=device)
         ee = torch.as_tensor(e, dtype=torch.long, device=device)
@@ -105,6 +114,9 @@ def main():
 
         if step % cfg.get("log_every", 200) == 0:
             print(f"step {step:6d}  loss {loss.item():.4f}  lr {lr:.2e}", flush=True)
+
+        if step % cfg.get("ckpt_every", 2000) == 0 and step > start_step:
+            save_ckpt(ckpt_path, model, opt, step, history, mcfg, cfg)
 
         if step > 0 and step % cfg.get("eval_every", 2000) == 0:
             e, s, l = sample(code, cfg.get("eval_shots", 20000), seed=999)
@@ -137,15 +149,6 @@ def main():
                   f"{'  [CONFOUNDED]' if loc['conv_is_global'] else ''}", flush=True)
             with open(os.path.join(run_dir, "history.json"), "w") as f:
                 json.dump(history, f, indent=2)
-
-        if step % cfg.get("ckpt_every", 2000) == 0 and step > start_step:
-            save_ckpt(ckpt_path, model, opt, step, history, mcfg, cfg)
-
-        if (time.time() - t_start) / 60.0 > max_minutes:
-            print(f"[walltime] guard hit at step {step}; checkpointing & exiting "
-                  f"for requeue.", flush=True)
-            save_ckpt(ckpt_path, model, opt, step, history, mcfg, cfg)
-            return
 
     save_ckpt(ckpt_path, model, opt, total - 1, history, mcfg, cfg)
     open(os.path.join(run_dir, "DONE"), "w").close()
