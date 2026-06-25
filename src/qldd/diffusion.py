@@ -109,8 +109,8 @@ def decode_constrained(model, s: torch.Tensor, code, n_steps: Optional[int] = No
     H = torch.as_tensor(code.H, dtype=torch.uint8, device=dev)        # (D, n)
     s_u = s.to(torch.uint8)
 
-    Hf = H.float()
-    def residual(e_bits):
+    Hf = H.float()                                                    # (D,n) on device
+    def residual(e_bits):  # e_bits uint8 (B,n) -> (B,D) residual syndrome {0,1}
         He = torch.remainder((e_bits.float() @ Hf.T).round().long(), 2)
         return (s_u.int() ^ He.int()) & 1
 
@@ -121,13 +121,13 @@ def decode_constrained(model, s: torch.Tensor, code, n_steps: Optional[int] = No
         pure net-weight-descent greedy (where clearing needs a flip that is
         locally weight-neutral). Vectorized over the batch."""
         for _ in range(iters):
-            r = residual(e_bits)
+            r = residual(e_bits)                        # (B,D)
             w = r.sum(dim=1)
             if int(w.max()) == 0:
                 break
             rf = r.float()
-            lit = (rf @ Hf)
-            unlit = ((1.0 - rf) @ Hf)
+            lit = (rf @ Hf)                             # (B,n) lit dets each bit touches
+            unlit = ((1.0 - rf) @ Hf)                   # (B,n) unlit dets each bit touches
             avail = committed & (lit > 0)               # committed bits touching a lit det
             # score: clear as many lit as possible while lighting few new ones
             score = (lit - unlit).float()
@@ -174,6 +174,39 @@ def decode_constrained(model, s: torch.Tensor, code, n_steps: Optional[int] = No
         committed = torch.ones_like(e_bits, dtype=torch.bool)
         e_bits = greedy_clear(e_bits, committed, iters=n)  # full clear pass
     return e_bits
+
+
+@torch.no_grad()
+def decode_match_projected(model, s_np, code, matching, n_steps=None,
+                           device="cpu", batch=512):
+    """Decode e with the model, then complete to a valid syndrome via MWPM on the
+    RESIDUAL (minimum-weight completion -> better coset than greedy clearing).
+
+    Returns (obs_pred, cleared) where obs_pred (N, n_obs) is the total predicted
+    observable flip = L @ e_g  XOR  observable-flip-of-MWPM(residual). cleared is
+    True for every shot by construction (matching always yields a consistent
+    completion), so this is reported for parity with the greedy path.
+    """
+    import numpy as np
+    N = s_np.shape[0]
+    n_obs = code.L.shape[0]
+    obs_pred = np.zeros((N, n_obs), dtype=np.uint8)
+    cleared = np.ones(N, dtype=bool)
+    H = code.H.astype(np.uint8)
+    L = code.L.astype(np.uint8)
+    for i in range(0, N, batch):
+        sb = s_np[i:i+batch]
+        st = torch.as_tensor(sb, dtype=torch.long, device=device)
+        eg = decode(model, st, n_steps=n_steps).cpu().numpy().astype(np.uint8)
+        # residual syndrome after the model's committed chain
+        res = (sb.astype(np.uint8) ^ ((H @ eg.T) % 2).T.astype(np.uint8))
+        # MWPM completes the residual; predict_obs is its observable flip
+        obs_corr = np.asarray(matching.decode_batch(res), dtype=np.uint8)
+        if obs_corr.ndim == 1:
+            obs_corr = obs_corr[:, None]
+        obs_model = (L @ eg.T % 2).T.astype(np.uint8)         # (b, n_obs)
+        obs_pred[i:i+batch] = (obs_model ^ obs_corr) & 1
+    return obs_pred, cleared
 
 
 @torch.no_grad()
