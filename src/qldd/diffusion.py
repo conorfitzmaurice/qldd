@@ -83,6 +83,99 @@ def decode(model, s: torch.Tensor, n_steps: Optional[int] = None) -> torch.Tenso
 
 
 @torch.no_grad()
+def decode_constrained(model, s: torch.Tensor, code, n_steps: Optional[int] = None,
+                       project_every: int = 1, final_project: bool = True
+                       ) -> torch.Tensor:
+    """Syndrome-constrained iterative unmasking.
+
+    The plain `decode` learns per-bit marginals but never enforces H e = s, so
+    at d>=7 the committed chain almost never clears the syndrome. Here, after
+    unmasking a batch of bits, we periodically PROJECT the current commitment
+    back toward syndrome-consistency by greedily flipping committed bits that
+    reduce the residual detector weight. Later unmasking steps then condition on
+    a (more) consistent partial state instead of compounding inconsistency.
+
+    H, s as torch on the model device; greedy flip step is vectorized over the
+    batch. final_project guarantees H e = s on exit (cleared = 1 by construction)
+    when the residual is reachable by single-bit flips.
+    """
+    model.eval()
+    dev = s.device
+    B = s.shape[0]
+    n = model.n_err
+    if n_steps is None:
+        n_steps = n
+    n_steps = max(1, min(n_steps, n))
+    H = torch.as_tensor(code.H, dtype=torch.uint8, device=dev)        # (D, n)
+    s_u = s.to(torch.uint8)
+
+    def residual(e_bits):  # e_bits uint8 (B,n) -> (B,D) residual syndrome
+        He = (e_bits.int() @ H.int().T) % 2
+        return (s_u.int() ^ He) & 1
+
+    def greedy_clear(e_bits, committed, iters):
+        """Clear residual by walking error chains. For each lit detector, flip a
+        committed bit incident to it that doesn't create more new lit detectors
+        than it clears -- this escapes the single-flip local minima that trap a
+        pure net-weight-descent greedy (where clearing needs a flip that is
+        locally weight-neutral). Vectorized over the batch."""
+        Hc = H.int()                                    # (D,n)
+        for _ in range(iters):
+            r = residual(e_bits)                        # (B,D)
+            w = r.sum(dim=1)
+            if int(w.max()) == 0:
+                break
+            lit = (r.int() @ Hc)                        # (B,n) lit dets each bit touches
+            unlit = ((1 - r.int()) @ Hc)                # (B,n) unlit dets each bit touches
+            avail = committed & (lit > 0)               # committed bits touching a lit det
+            # score: clear as many lit as possible while lighting few new ones
+            score = (lit - unlit).float()
+            score = score.masked_fill(~avail, -1e9)
+            best = score.argmax(dim=1)
+            # accept if the chosen bit touches >=1 lit detector (guaranteed
+            # progress on that detector even if net weight is flat)
+            ok = avail.gather(1, best.unsqueeze(1)).squeeze(1)
+            flip = torch.zeros_like(e_bits, dtype=torch.bool)
+            flip.scatter_(1, best.unsqueeze(1), True)
+            flip &= ok.unsqueeze(1)
+            if not bool(flip.any()):
+                break
+            e_bits = torch.where(flip, 1 - e_bits, e_bits)
+        return e_bits
+
+    e_t = torch.full((B, n), MASK_TOKEN, dtype=torch.long, device=dev)
+    for step in range(n_steps):
+        logits = model(s, e_t)
+        prob1 = torch.sigmoid(logits)
+        pred = (prob1 > 0.5).long()
+        conf = torch.maximum(prob1, 1 - prob1)
+        is_masked = (e_t == MASK_TOKEN)
+        conf = conf.masked_fill(~is_masked, -1.0)
+        k = int(np.ceil(n / n_steps))
+        idx = torch.topk(conf, min(k, n), dim=1).indices
+        sel = torch.zeros_like(e_t, dtype=torch.bool)
+        sel.scatter_(1, idx, True)
+        sel &= is_masked
+        e_t = torch.where(sel, pred, e_t)
+        # project committed bits toward consistency so later steps condition on it
+        if project_every and (step % project_every == 0):
+            committed = (e_t != MASK_TOKEN)
+            e_bits = e_t.clamp(max=1).to(torch.uint8)
+            e_bits = greedy_clear(e_bits, committed, iters=4)
+            e_t = torch.where(committed, e_bits.long(), e_t)
+
+    still = (e_t == MASK_TOKEN)
+    if still.any():
+        logits = model(s, e_t)
+        e_t[still] = (torch.sigmoid(logits)[still] > 0.5).long()
+    e_bits = e_t.to(torch.uint8)
+    if final_project:
+        committed = torch.ones_like(e_bits, dtype=torch.bool)
+        e_bits = greedy_clear(e_bits, committed, iters=n)  # full clear pass
+    return e_bits
+
+
+@torch.no_grad()
 def evaluate_ler(model, code, s_np, e_np, l_np, n_steps=None, device="cpu",
                  batch=512) -> dict:
     """LER of the diffusion decoder + residual diagnostics; comparable to the
