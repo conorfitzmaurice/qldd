@@ -109,9 +109,10 @@ def decode_constrained(model, s: torch.Tensor, code, n_steps: Optional[int] = No
     H = torch.as_tensor(code.H, dtype=torch.uint8, device=dev)        # (D, n)
     s_u = s.to(torch.uint8)
 
-    def residual(e_bits):  # e_bits uint8 (B,n) -> (B,D) residual syndrome
-        He = (e_bits.int() @ H.int().T) % 2
-        return (s_u.int() ^ He) & 1
+    Hf = H.float()
+    def residual(e_bits):
+        He = torch.remainder((e_bits.float() @ Hf.T).round().long(), 2)
+        return (s_u.int() ^ He.int()) & 1
 
     def greedy_clear(e_bits, committed, iters):
         """Clear residual by walking error chains. For each lit detector, flip a
@@ -119,14 +120,14 @@ def decode_constrained(model, s: torch.Tensor, code, n_steps: Optional[int] = No
         than it clears -- this escapes the single-flip local minima that trap a
         pure net-weight-descent greedy (where clearing needs a flip that is
         locally weight-neutral). Vectorized over the batch."""
-        Hc = H.int()                                    # (D,n)
         for _ in range(iters):
-            r = residual(e_bits)                        # (B,D)
+            r = residual(e_bits)
             w = r.sum(dim=1)
             if int(w.max()) == 0:
                 break
-            lit = (r.int() @ Hc)                        # (B,n) lit dets each bit touches
-            unlit = ((1 - r.int()) @ Hc)                # (B,n) unlit dets each bit touches
+            rf = r.float()
+            lit = (rf @ Hf)
+            unlit = ((1.0 - rf) @ Hf)
             avail = committed & (lit > 0)               # committed bits touching a lit det
             # score: clear as many lit as possible while lighting few new ones
             score = (lit - unlit).float()
