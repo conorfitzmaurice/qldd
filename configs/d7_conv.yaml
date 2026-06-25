@@ -1,0 +1,39 @@
+# d=7 CONVERGENCE run: train the d_model-128 model long enough that its committed
+# error chain steers MWPM-on-residual (decode scheme "D") to a BETTER coset than
+# MWPM alone -> beat MWPM at d=7. The d_model-64/24k-step model only reached MWPM
+# PARITY (strict 0.050 vs 0.046); this run tests whether capacity + training push
+# strictly below 0.046.
+#
+# Sized for MIG (the attention T^2 term dominates memory, so width is ~free vs
+# the d_model-64 run): batch 48 keeps one-block attn < 10 GB with grad checkpoint.
+# 250k steps will chain across several 23.5h MIG jobs via the walltime guard
+# (now fixed: guard at top of loop, ckpt before eval).
+run_dir: runs/d7_conv
+distance: 7
+rounds: 7
+p: 0.03
+steps: 250000
+batch_size: 48
+lr: 2.0e-3
+min_lr: 4.0e-5
+warmup: 2000
+weight_decay: 1.0e-4
+grad_clip: 1.0
+eval_batch: 512
+eval_every: 4000
+eval_shots: 10000        # light eval during training (the real number comes from
+                         # eval_decoder_D.py at high shots on the final ckpt)
+infer_steps: 48
+log_every: 500
+ckpt_every: 2000         # frequent ckpt so requeue loses little; ckpt BEFORE eval
+max_minutes: 1320        # ~22h, under the 23.5h wall, then requeue from ckpt
+seed: 0
+model:
+  d_model: 128
+  n_heads: 8
+  n_layers: 8
+  d_ff: 512
+  use_conv_stem: false
+  xi_space_init: 3.0
+  xi_time_init: 3.0
+  xi_min: 0.5
