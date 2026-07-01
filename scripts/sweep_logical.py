@@ -22,10 +22,10 @@ from qldd.baseline import build_matching
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", default="runs/d7_logical")
-    ap.add_argument("--shots", type=int, default=200000)
-    ap.add_argument("--pmin", type=float, default=0.005)
+    ap.add_argument("--shots", type=int, default=1000000)
+    ap.add_argument("--pmin", type=float, default=0.003)
     ap.add_argument("--pmax", type=float, default=0.03)
-    ap.add_argument("--npoints", type=int, default=8)
+    ap.add_argument("--npoints", type=int, default=10)
     ap.add_argument("--batch", type=int, default=8192)
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
