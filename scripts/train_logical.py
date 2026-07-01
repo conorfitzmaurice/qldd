@@ -29,6 +29,8 @@ def main():
     ap.add_argument("--n_layers", type=int, default=8)
     ap.add_argument("--eval_every", type=int, default=2000)
     ap.add_argument("--eval_shots", type=int, default=100000)
+    ap.add_argument("--causal", action="store_true",
+                    help="online decoder: causal-time attention, no future leakage")
     ap.add_argument("--run", default="runs/d7_logical")
     args = ap.parse_args()
     dev = "cuda" if torch.cuda.is_available() else "cpu"
@@ -38,10 +40,14 @@ def main():
                           rounds=args.rounds or args.distance, p=args.p)
     matching = build_matching(code)               # eval baseline ONLY
     # token seq is detectors only -> small attention, no grad checkpoint needed
+    # ONLINE: causal-time attention; disable the conv stem because its symmetric
+    # Conv3d temporal kernel (padding=1) mixes round t+1 into token t, which would
+    # leak the future even with causal attention. Offline keeps the conv stem.
     cfg = ModelConfig(d_model=args.d_model, n_heads=args.n_heads,
                       n_layers=args.n_layers, d_ff=4 * args.d_model,
-                      use_conv_stem=True, conv_layers=1, xi_min=0.5,
+                      use_conv_stem=(not args.causal), conv_layers=1, xi_min=0.5,
                       xi_space_init=3.0, xi_time_init=3.0,
+                      causal_time=args.causal,
                       grad_checkpoint=False)
     model = LogicalDecoder(cfg, code).to(dev)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
@@ -53,9 +59,11 @@ def main():
     rate = max(float(pl.mean()), 1e-4)
     pos_weight = (torch.tensor([(1 - rate) / rate], device=dev)
                   if rate < 0.4 else None)
-    print(f"[setup] d={args.distance} n_det={code.n_det} n_obs={code.n_obs} "
+    mode = "ONLINE (causal)" if args.causal else "offline"
+    print(f"[setup] {mode} d={args.distance} n_det={code.n_det} n_obs={code.n_obs} "
           f"P(l=1)~{rate:.4f} pos_weight={'none' if pos_weight is None else round(pos_weight.item(),1)} "
-          f"params={sum(p.numel() for p in model.parameters()):,} dev={dev}", flush=True)
+          f"conv_stem={cfg.use_conv_stem} params={sum(p.numel() for p in model.parameters()):,} dev={dev}",
+          flush=True)
 
     hist = []
     t0 = time.time()
