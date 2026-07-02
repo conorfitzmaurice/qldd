@@ -22,9 +22,9 @@ def conv_receptive_field_voxels(model: LocalDiffusionDecoder) -> dict:
     stem = model.stem
     X, Y, T = stem.grid_shape
     dm = model.cfg.d_model
-    dev = next(stem.conv.parameters()).device
+    dev = next(stem.convs.parameters()).device
     grid = torch.zeros(1, dm, X, Y, T, requires_grad=True, device=dev)
-    out = stem.conv(grid)                           # (1, dm, X, Y, T)
+    out = stem._run_convs(grid)                     # (1, dm, X, Y, T)
     cx, cy, ct = X // 2, Y // 2, T // 2
     out[:, :, cx, cy, ct].sum().backward()
     g = grid.grad.abs().sum(dim=(0, 1)).cpu().numpy()  # (X, Y, T) support
@@ -34,7 +34,7 @@ def conv_receptive_field_voxels(model: LocalDiffusionDecoder) -> dict:
     rf_x = diameter(g.sum(axis=(1, 2)) > 0)
     rf_y = diameter(g.sum(axis=(0, 2)) > 0)
     rf_t = diameter(g.sum(axis=(0, 1)) > 0)
-    n_conv = sum(1 for m in stem.conv if isinstance(m, torch.nn.Conv3d))
+    n_conv = len(stem.convs)
     analytic = 2 * n_conv + 1
     return {"conv_stem": True, "n_conv_layers": n_conv,
             "rf_voxels": {"x": rf_x, "y": rf_y, "t": rf_t},

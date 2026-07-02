@@ -40,12 +40,13 @@ def main():
                           rounds=args.rounds or args.distance, p=args.p)
     matching = build_matching(code)               # eval baseline ONLY
     # token seq is detectors only -> small attention, no grad checkpoint needed
-    # ONLINE: causal-time attention; disable the conv stem because its symmetric
-    # Conv3d temporal kernel (padding=1) mixes round t+1 into token t, which would
-    # leak the future even with causal attention. Offline keeps the conv stem.
+    # ONLINE: causal-time attention + CAUSAL conv stem (past-only temporal
+    # padding, sees t-2..t, never t+1). The stem is essential -- without it the
+    # causal model sat at chance (0.455 ~ marginal) at d=7; raw attention could
+    # not form the local syndrome features from scratch.
     cfg = ModelConfig(d_model=args.d_model, n_heads=args.n_heads,
                       n_layers=args.n_layers, d_ff=4 * args.d_model,
-                      use_conv_stem=(not args.causal), conv_layers=1, xi_min=0.5,
+                      use_conv_stem=True, conv_layers=1, xi_min=0.5,
                       xi_space_init=3.0, xi_time_init=3.0,
                       causal_time=args.causal,
                       grad_checkpoint=False)

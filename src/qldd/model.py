@@ -74,13 +74,33 @@ class SpacetimeConvStem(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.grid_shape = grid_shape  # (X, Y, T)
+        self.causal = bool(getattr(cfg, "causal_time", False))
         self.register_buffer("gidx", torch.as_tensor(det_grid_idx, dtype=torch.long))
         ch = cfg.conv_channels
-        layers = [nn.Conv3d(cfg.d_model, ch, kernel_size=3, padding=1), nn.GELU()]
+        # Symmetric (offline): pad=1 on all axes -> kernel sees t-1,t,t+1.
+        # Causal (online): T-padding 0 in the conv; we F.pad the PAST side by 2
+        # before each conv, so the kernel sees t-2,t-1,t and NEVER t+1. This
+        # preserves the streaming guarantee while keeping the local feature
+        # extractor the offline model relies on.
+        tpad = 0 if self.causal else 1
+        convs = [nn.Conv3d(cfg.d_model, ch, kernel_size=3, padding=(1, 1, tpad))]
         for _ in range(cfg.conv_layers - 1):
-            layers += [nn.Conv3d(ch, ch, kernel_size=3, padding=1), nn.GELU()]
-        layers += [nn.Conv3d(ch, cfg.d_model, kernel_size=3, padding=1)]
-        self.conv = nn.Sequential(*layers)
+            convs.append(nn.Conv3d(ch, ch, kernel_size=3, padding=(1, 1, tpad)))
+        convs.append(nn.Conv3d(ch, cfg.d_model, kernel_size=3, padding=(1, 1, tpad)))
+        self.convs = nn.ModuleList(convs)
+        self.act = nn.GELU()
+
+    def _run_convs(self, grid: torch.Tensor) -> torch.Tensor:
+        x = grid
+        n = len(self.convs)
+        for i, conv in enumerate(self.convs):
+            if self.causal:
+                # (B,C,X,Y,T): F.pad pads last dim first -> (T_left, T_right, ...)
+                x = torch.nn.functional.pad(x, (2, 0, 0, 0, 0, 0))
+            x = conv(x)
+            if i < n - 1:
+                x = self.act(x)
+        return x
 
     def forward(self, det_feats: torch.Tensor) -> torch.Tensor:
         B, n_det, dm = det_feats.shape
@@ -88,7 +108,7 @@ class SpacetimeConvStem(nn.Module):
         grid = det_feats.new_zeros(B, dm, X, Y, T)
         gx, gy, gt = self.gidx[:, 0], self.gidx[:, 1], self.gidx[:, 2]
         grid[:, :, gx, gy, gt] = det_feats.transpose(1, 2)
-        grid = grid + self.conv(grid)            # residual spacetime conv
+        grid = grid + self._run_convs(grid)      # residual spacetime conv
         return grid[:, :, gx, gy, gt].transpose(1, 2)
 
 
